@@ -1,85 +1,55 @@
-import os
 from flask import Flask, request, jsonify
-from flask_mail import Mail, Message
-from dotenv import load_dotenv
-import logging
-
-# Load .env variables
-load_dotenv()
+from flask_cors import CORS
+import smtplib
+from email.message import EmailMessage
 
 app = Flask(__name__)
+CORS(app)
 
-# Mail Configuration
-app.config.update(
-    MAIL_SERVER=os.getenv('MAIL_SERVER'),
-    MAIL_PORT=int(os.getenv('MAIL_PORT', 587)),
-    MAIL_USERNAME=os.getenv('MAIL_USERNAME'),
-    MAIL_PASSWORD=os.getenv('MAIL_PASSWORD'),
-    MAIL_USE_TLS=os.getenv('MAIL_USE_TLS', 'True') == 'True',
-    MAIL_USE_SSL=os.getenv('MAIL_USE_SSL', 'False') == 'True',
-)
+GMAIL_USER = "abdullahtariq.nns.966@gmail.com"
+GMAIL_APP_PASSWORD = "lywt fzjj xwfy mqfo"  # Use a Gmail App Password
 
-mail = Mail(app)
+@app.route('/')
+def home():
+    return '✅ Flask SMTP API is live!'
 
-# Enable debug logging
-logging.basicConfig(level=logging.DEBUG)
-
-@app.route('/api/send-facility-provider', methods=['POST'])
-def send_facility_provider():
+@app.route('/send-facility-email/', methods=['POST'])
+def send_facility_email():
     try:
         data = request.get_json(force=True)
-        providers = data.get('providers', [])
-        event_title = data.get('event_title')
-        venue = data.get('venue')
+        print("📨 Received payload:", data)
 
-        if not providers:
-            return jsonify({'error': 'No providers received'}), 400
-        if not event_title or not venue:
-            return jsonify({'error': 'Missing event title or venue'}), 400
+        recipients = data.get('recipients')
+        facilities = data.get('facilities')  # Now expecting a list of facilities
+        event = data.get('event')
 
-        results = []
+        if not recipients or not isinstance(recipients, list) or not facilities or not isinstance(facilities, list) or not event:
+            return jsonify({'status': 'error', 'message': 'Missing or invalid fields'}), 400
 
-        for provider in providers:
-            name = provider.get('providerName')
-            email = provider.get('providerEmail')
-            facility = provider.get('facilityName')
+        subject = f"Facilities Approved for {event}"
+        facilities_str = ', '.join(facilities)
+        body = f'The following facilities have been approved for event "{event}": {facilities_str}. Please prepare accordingly.'
 
-            if not email or not name or not facility:
-                results.append({
-                    'email': email or 'unknown',
-                    'status': 'skipped - incomplete provider info'
-                })
-                continue
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
 
-            body = (
-                f"Dear {name},\n\n"
-                f"You have been assigned as the facility provider for:\n\n"
-                f"Event: {event_title}\n"
-                f"Venue: {venue}\n"
-                f"Facility: {facility}\n\n"
-                f"Please make the necessary arrangements.\n\n"
-                f"Thank you!"
-            )
+            for to in recipients:
+                msg = EmailMessage()
+                msg["Subject"] = subject
+                msg["From"] = GMAIL_USER
+                msg["To"] = to
+                msg.set_content(body)
+                try:
+                    server.send_message(msg)
+                    print(f"✅ Email sent to {to}")
+                except Exception as e:
+                    print(f"❌ Failed to send to {to}: {e}")
 
-            try:
-                msg = Message(
-                    subject=f"Facility Assignment - {event_title}",
-                    sender=app.config['MAIL_USERNAME'],
-                    recipients=[email],
-                    body=body
-                )
-                mail.send(msg)
-                results.append({'email': email, 'status': 'sent'})
-            except Exception as e:
-                logging.error(f"Mail send failed for {email}: {e}")
-                results.append({'email': email, 'status': f'error - {str(e)}'})
-
-        return jsonify({'results': results}), 200
+        return jsonify({'status': 'success'}), 200
 
     except Exception as e:
-        logging.exception("Unhandled exception in /api/send-facility-provider")
-        return jsonify({'error': f'Internal Server Error: {str(e)}'}), 500
-
+        print("🔥 Exception occurred:", str(e))
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
